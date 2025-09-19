@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Подарок — Открыть</title>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;400&display=swap" rel="stylesheet">
+  <style>
+    :root{--accent:#ff6b6b;--accent2:#ffd166;--bg:#060608}
+    html,body{height:100%;margin:0;background:var(--bg);font-family:Nunito,system-ui,Arial,sans-serif;color:#fff}
+    .stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
+
+    /* Image setup: use contain so the image is shown fully and we fit the image's aspect */
+    .photo{max-width:100%;max-height:100%;object-fit:contain;display:none;transform-origin:center center;transition:transform 1s cubic-bezier(.2,.9,.3,1)}
+
+    /* Center button */
+    .center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:auto}
+    .btn{background:linear-gradient(135deg,var(--accent),#ff9a9e);border:0;padding:18px 28px;border-radius:999px;font-size:20px;cursor:pointer;box-shadow:0 8px 30px rgba(0,0,0,0.5);display:flex;gap:12px;align-items:center}
+    .btn:active{transform:translateY(1px) scale(0.995)}
+    .label{font-weight:700}
+
+    /* Portrait hint */
+    .rotate-hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;background:linear-gradient(0deg, rgba(0,0,0,0.7), rgba(0,0,0,0.35));backdrop-filter:blur(3px);}
+    .rotate-box{display:flex;align-items:center;gap:10px;padding:16px;border-radius:12px;background:rgba(255,255,255,0.06)}
+    .arrow{font-size:48px}
+    .small{opacity:0.9;font-size:15px}
+
+    /* Confetti canvas sits above image */
+    canvas#confetti{position:absolute;inset:0;pointer-events:none}
+
+    /* Gift badge */
+    .badge{position:fixed;left:18px;top:18px;background:rgba(255,255,255,0.06);padding:8px 12px;border-radius:999px;font-weight:700}
+
+    @media (min-aspect-ratio: 3/2){ /* very wide screens - nudge image smaller */
+      .photo{max-width:80%;max-height:95%}
+    }
+  </style>
+</head>
+<body>
+
+<div class="stage" id="stage">
+  <img id="photo" class="photo" alt="gift image" />
+  <canvas id="confetti"></canvas>
+
+  <div class="center" id="ui">
+    <button id="openBtn" class="btn"><span class="emoji">🎁</span><span class="label">Открыть подарок (не забудьте включите звук)</span></button>
+  </div>
+
+  <div id="portraitHint" class="rotate-hint" style="display:none">
+    <div class="rotate-box">
+      <div style="font-size:20px;font-weight:700">Поверни телефон в портретный режим</div>
+      <div class="arrow">🔄</div>
+    </div>
+    <div class="small">Лучше смотреть вверх ногами... шучу — в портрете будет красивее ✨</div>
+  </div>
+
+  <div class="badge">Текст 1</div>
+</div>
+
+<audio id="player" preload="auto"></audio>
+
+<script>
+  // Provided by you
+  const IMAGE_URL = 'https://j2ietkzn70.ufs.sh/f/moVJ8ZlzbCSfvxEA1CPOpFv5iMYGgnzDoWKXaqkQRtr7wSxu';
+  const AUDIO_URL = 'https://j2ietkzn70.ufs.sh/f/moVJ8ZlzbCSfkdPYkcObSlBI0Mgf6h4D2LUWoEKrav3TqJcd';
+
+  const photo = document.getElementById('photo');
+  const player = document.getElementById('player');
+  const openBtn = document.getElementById('openBtn');
+  const ui = document.getElementById('ui');
+  const portraitHint = document.getElementById('portraitHint');
+  const confettiCanvas = document.getElementById('confetti');
+  const ctx = confettiCanvas.getContext('2d');
+
+  // preload image
+  const pre = new Image();
+  pre.crossOrigin = 'anonymous';
+  pre.src = IMAGE_URL;
+  pre.onload = ()=>{ photo.src = IMAGE_URL; }
+  pre.onerror = ()=>{ photo.src = IMAGE_URL }
+
+  // preload audio
+  player.src = AUDIO_URL;
+  player.preload = 'auto';
+  player.loop = false;
+  player.crossOrigin = 'anonymous';
+
+  // best-effort decode to reduce delay
+  (async function tryDecode(){
+    try{
+      const resp = await fetch(AUDIO_URL, {mode:'cors'});
+      const arr = await resp.arrayBuffer();
+      const ctxAudio = new (window.AudioContext || window.webkitAudioContext)();
+      await ctxAudio.decodeAudioData(arr.slice(0));
+      ctxAudio.close();
+    }catch(e){/* ignore */}
+  })();
+
+  // size confetti canvas
+  function resizeCanvas(){
+    confettiCanvas.width = window.innerWidth;
+    confettiCanvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  // tiny confetti engine
+  const confettiPieces = [];
+  function spawnConfetti(){
+    const w = confettiCanvas.width;
+    const h = confettiCanvas.height;
+    for(let i=0;i<120;i++){
+      confettiPieces.push({
+        x: Math.random()*w,
+        y: -10 - Math.random()*h*0.2,
+        vx: (Math.random()-0.5)*6,
+        vy: 2 + Math.random()*6,
+        size: 6 + Math.random()*10,
+        rot: Math.random()*360,
+        vr: (Math.random()-0.5)*10,
+        color: ['#ff6b6b','#ffd166','#6bf6ff','#cba6ff','#9be66b'][Math.floor(Math.random()*5)]
+      });
+    }
+    runConfetti();
+  }
+
+  let confettiAnim = null;
+  function runConfetti(){
+    if(confettiAnim) return;
+    function loop(){
+      ctx.clearRect(0,0,confettiCanvas.width,confettiCanvas.height);
+      for(let i=confettiPieces.length-1;i>=0;i--){
+        const p = confettiPieces[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.06; // gravity
+        p.rot += p.vr;
+        ctx.save();
+        ctx.translate(p.x,p.y);
+        ctx.rotate(p.rot*Math.PI/180);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.size/2,-p.size/2,p.size,p.size*0.6);
+        ctx.restore();
+        if(p.y > confettiCanvas.height+50) confettiPieces.splice(i,1);
+      }
+      if(confettiPieces.length>0) confettiAnim = requestAnimationFrame(loop);
+      else confettiAnim = null;
+    }
+    confettiAnim = requestAnimationFrame(loop);
+  }
+
+  // portrait detection: if device is currently landscape and screen is smallish, ask to rotate
+  function checkOrientation(){
+    const isPortrait = window.innerHeight >= window.innerWidth;
+    // only show hint on small screens (mobile/tablet)
+    if(!isPortrait && Math.min(window.innerWidth,window.innerHeight) < 900){
+      portraitHint.style.display = 'flex';
+      ui.style.display = 'none';
+      photo.style.display = 'none';
+    } else {
+      portraitHint.style.display = 'none';
+      ui.style.display = 'flex';
+    }
+  }
+  window.addEventListener('orientationchange', ()=>setTimeout(checkOrientation,300));
+  window.addEventListener('resize', checkOrientation);
+  checkOrientation();
+
+  // when opening: fullscreen, show image fit to its aspect, gentle zoom, play audio, confetti, and a playful little text-to-speech subtitle effect
+  async function openGift(){
+    openBtn.style.display = 'none';
+    // request fullscreen on document element
+    try{ const el = document.documentElement; if(el.requestFullscreen) await el.requestFullscreen(); else if(el.webkitRequestFullscreen) await el.webkitRequestFullscreen(); }catch(e){}
+
+    // hide UI and portrait hint
+    ui.style.display = 'none'; portraitHint.style.display = 'none';
+
+    // show the photo
+    photo.style.display = 'block';
+
+    // small playful zoom
+    photo.style.transform = 'scale(0.98)';
+    setTimeout(()=>photo.style.transform = 'scale(1.03)',40);
+
+    // play audio (user gesture)
+    try{ await player.play(); }catch(e){ console.warn('play failed', e); }
+
+    // spawn confetti
+    spawnConfetti();
+
+    // show a tiny subtitle bubble with the message in Russian (fades out)
+    showSubtitle("С таким лицом и цветом кожи, для маски лучше сразу, взять кружочки огурцов солёных и пузырёк ноль пять");
+  }
+
+  // subtitle bubble
+  function showSubtitle(text){
+    const el = document.createElement('div');
+    el.style.position='fixed'; el.style.left='50%'; el.style.bottom='8%'; el.style.transform='translateX(-50%)';
+    el.style.background='linear-gradient(90deg, rgba(0,0,0,0.6), rgba(0,0,0,0.45))';
+    el.style.padding='12px 18px'; el.style.borderRadius='999px'; el.style.fontWeight='700'; el.style.fontSize='16px'; el.style.maxWidth='80%'; el.style.textAlign='center'; el.style.backdropFilter='blur(4px)'; el.style.opacity='0'; el.style.transition='opacity 400ms, transform 400ms';
+    el.textContent = text;
+    document.body.appendChild(el);
+    requestAnimationFrame(()=>{ el.style.opacity='1'; el.style.transform='translateX(-50%) translateY(0)'; });
+    setTimeout(()=>{ el.style.opacity='0'; el.style.transform='translateX(-50%) translateY(10px)'; setTimeout(()=>el.remove(),500); },6500);
+  }
+
+  openBtn.addEventListener('click', ()=>{
+    // ensure portrait if needed
+    if(portraitHint.style.display === 'flex') return; // ignore if still asking to rotate
+    openGift();
+  });
+
+  // small keyboard shortcut for desktop (Enter)
+  window.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') openBtn.click(); });
+
+  // if user exits fullscreen, keep the image visible but don't show controls again
+  document.addEventListener('fullscreenchange', ()=>{});
+
+  // debug: catch audio load errors
+  player.addEventListener('error', ()=>{ console.error('audio error'); });
+
+</script>
+
+</body>
+</html>
