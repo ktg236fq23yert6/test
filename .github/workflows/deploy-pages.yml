@@ -1,0 +1,37 @@
+name: Deploy to GitHub Pages (artifact -> Pages)
+
+on:
+  push:
+    branches: [ main ]     # change if your default branch is different
+  workflow_dispatch:       # allows manual run from Actions tab
+
+permissions:
+  pages: write
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # If you need to build your site, run build steps here.
+      # For a simple static repo with index.html there's nothing to build.
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v1
+        with:
+          path: ./            # upload the repository root (or ./public if you build to a folder)
+
+  deploy:
+    needs: build-and-deploy
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
